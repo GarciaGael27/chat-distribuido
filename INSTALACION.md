@@ -19,6 +19,40 @@ clúster **MicroShift** con **Podman**.
 > El desarrollo local solo necesita **Node.js, npm y Git**.
 > Podman y MicroShift se usan únicamente para el despliegue en el clúster.
 
+### 1.1 Imágenes de Red Hat (sin Docker Hub)
+
+El proyecto usa exclusivamente registros de Red Hat:
+
+| Imagen | Registro | Login |
+|---|---|---|
+| `ubi9/nodejs-20` (base del Dockerfile) | `registry.access.redhat.com` | No requiere |
+| `rhel9/redis-7` (bus Pub/Sub) | `registry.redhat.io` | **Requiere** cuenta Red Hat |
+
+Como la imagen de Redis vive en `registry.redhat.io`, autentícate en la VM con
+tu cuenta de desarrollador Red Hat antes de desplegar:
+
+```bash
+podman login registry.redhat.io        # usuario/contraseña de Red Hat
+```
+
+MicroShift descarga las imágenes de los pods usando su **pull secret global**
+(`/etc/crio/openshift-pull-secret`). Ese secret ya incluye tus credenciales de
+Red Hat (es el que configuraste al instalar MicroShift), por lo que los pods
+pueden bajar `rhel9/redis-7` sin cambios adicionales. Para comprobarlo:
+
+```bash
+sudo grep -o 'registry.redhat.io' /etc/crio/openshift-pull-secret && echo "pull secret OK"
+```
+
+> **Alternativa** (si el secret global no tuviera tus credenciales): crea un
+> secret en el namespace y refér encialo con `imagePullSecrets`:
+> ```bash
+> oc create secret docker-registry redhat-pull \
+>   --docker-server=registry.redhat.io \
+>   --docker-username='TU_USUARIO' --docker-password='TU_TOKEN'
+> oc secrets link default redhat-pull --for=pull
+> ```
+
 ---
 
 ## 2. Instalación en desarrollo local
@@ -110,6 +144,9 @@ sudo systemctl start microshift
 > **Importante:** despliega **Redis primero**. Las réplicas lo usan como bus
 > Pub/Sub para compartir los mensajes; sin él, cada pod sería una isla y dos
 > usuarios en pods distintos no se verían. Ver la sección 9.
+>
+> La imagen de Redis viene de `registry.redhat.io`: asegúrate de haber hecho
+> `podman login registry.redhat.io` y de tener el pull secret de Red Hat (§1.1).
 
 ```bash
 oc apply -f k8s/redis.yaml        # bus Pub/Sub compartido (Deployment + Service)

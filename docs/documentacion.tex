@@ -417,7 +417,12 @@ disconnect & Socket.io interno & --- & Conexión perdida. \\
 % =====================================================================
 
 \subsection{Contenedor --- Dockerfile}
-\lstinputlisting[language=bash,caption={Dockerfile basado en node:20-alpine.}]{../Dockerfile}
+Todo el flujo de imágenes usa registros de \textbf{Red Hat} (no Docker Hub). La
+imagen base es la \textbf{UBI 9 con Node.js 20}
+(\texttt{registry.access.redhat.com/ubi9/nodejs-20}), de registro público y
+diseñada para ejecutarse sin \emph{root} bajo las políticas de seguridad de
+MicroShift. La imagen se construye con \textbf{Podman}.
+\lstinputlisting[language=bash,caption={Dockerfile basado en la imagen UBI 9 de Node.js 20.}]{../Dockerfile}
 
 \subsection{Construcción de la Imagen con Podman}
 \begin{lstlisting}[language=bash]
@@ -439,13 +444,19 @@ podman images
 \subsection{Manifiesto de Redis --- redis.yaml}
 Redis actúa como bus \emph{Pub/Sub} entre las réplicas. Su \texttt{Service} de
 tipo \texttt{ClusterIP} expone el nombre DNS interno \texttt{redis}, que las
-réplicas usan en \texttt{REDIS\_URL=redis://redis:6379}.
-\lstinputlisting[language=,caption={k8s/redis.yaml --- Deployment y Service de Redis.}]{../k8s/redis.yaml}
+réplicas usan en \texttt{REDIS\_URL=redis://redis:6379}. Se usa la imagen
+oficial de Red Hat \texttt{registry.redhat.io/rhel9/redis-7}; al estar en
+\texttt{registry.redhat.io} requiere autenticación
+(\texttt{podman login registry.redhat.io}) y que MicroShift disponga del
+\emph{pull secret} de Red Hat (el global en
+\texttt{/etc/crio/openshift-pull-secret}).
+\lstinputlisting[language=,caption={k8s/redis.yaml --- Deployment y Service de Redis (imagen RHEL 9).}]{../k8s/redis.yaml}
 
 \subsection{Comandos de Despliegue}
 \begin{lstlisting}[language=bash]
-# 1. Verificar estado del cluster antes de desplegar
+# 1. Verificar estado del cluster y autenticarse en el registro de Red Hat
 oc get nodes
+podman login registry.redhat.io        # necesario para la imagen de Redis
 
 # 2. Aplicar los manifiestos YAML (Redis primero: bus Pub/Sub)
 oc apply -f k8s/redis.yaml

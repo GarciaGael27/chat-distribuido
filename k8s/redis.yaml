@@ -19,7 +19,10 @@ spec:
     spec:
       containers:
         - name: redis
-          image: docker.io/redis:7-alpine
+          # Imagen oficial de Redis de Red Hat (RHEL 9).
+          # Requiere que el clúster tenga el pull secret de Red Hat
+          # (el global de MicroShift en /etc/crio/openshift-pull-secret).
+          image: registry.redhat.io/rhel9/redis-7:latest
           ports:
             - containerPort: 6379
           livenessProbe:

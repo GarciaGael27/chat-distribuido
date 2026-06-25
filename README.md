@@ -40,7 +40,7 @@ chat-distribuido/
 ├── scripts/
 │   └── verificar-red.sh         Verifica alcance del servidor con curl
 ├── cliente-terminal.js          Cliente de chat para terminal (sin navegador)
-└── Dockerfile                   Imagen de contenedor (node:20-alpine)
+└── Dockerfile                   Imagen de contenedor (UBI 9 · Node.js 20 de Red Hat)
 ```
 
 ## Desarrollo local
@@ -51,6 +51,10 @@ npm run start:dev          # http://localhost:3000
 ```
 
 ## Despliegue en MicroShift
+
+> Imágenes desde registros de **Red Hat** (no Docker Hub): base UBI 9
+> `registry.access.redhat.com/ubi9/nodejs-20` y Redis
+> `registry.redhat.io/rhel9/redis-7`. Para Redis: `podman login registry.redhat.io`.
 
 ```bash
 # 1. Construir la imagen con Podman (en la VM Red Hat)
