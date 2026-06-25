@@ -127,15 +127,21 @@ podman images | grep chat-distribuido
 
 ## 4. Despliegue en MicroShift
 
-### 4.1 Verificar el clúster
+### 4.1 Auditoría del clúster (prerrequisito de evaluación)
 
 ```bash
-oc get nodes          # el nodo debe aparecer en estado Ready
+# 1. Estado del nodo: la columna STATUS debe decir Ready
+oc get nodes
+
+# 2. Cargas de trabajo internas del orquestador: la mayoría en Running/Completed
+oc get pods -A
 ```
 
-Si aparece `NotReady` o el comando falla, arranca MicroShift:
+Si el nodo aparece `NotReady` o el comando falla, revisa el firewall y arranca
+el servicio:
 
 ```bash
+sudo systemctl status microshift
 sudo systemctl start microshift
 ```
 
