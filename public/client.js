@@ -1,8 +1,14 @@
 // public/client.js
 
-// Conexión al servidor WebSocket con reconexión automática
-// reconnectionDelay: espera 1 segundo entre intentos de reconexión
-const socket = io({ reconnection: true, reconnectionDelay: 1000 });
+// Conexión al servidor WebSocket con reconexión automática.
+// reconnectionDelay: espera 1 segundo entre intentos de reconexión.
+// transports: ['websocket'] evita el long-polling para que, con varias
+// réplicas detrás del Service, la conexión sea estable (una sola TCP por pod).
+const socket = io({
+  reconnection: true,
+  reconnectionDelay: 1000,
+  transports: ['websocket'],
+});
 
 let miNombre = '';
 

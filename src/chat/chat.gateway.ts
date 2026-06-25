@@ -9,7 +9,10 @@ import {
   } from '@nestjs/websockets';
   import { Server, Socket } from 'socket.io';
 
-  @WebSocketGateway({ cors: { origin: '*' } })
+  // transports: ['websocket'] fuerza una única conexión TCP por cliente.
+  // Esto evita el problema de "Session ID unknown" cuando hay varias réplicas
+  // detrás del Service (el long-polling repartiría las peticiones entre pods).
+  @WebSocketGateway({ cors: { origin: '*' }, transports: ['websocket'] })
   export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     @WebSocketServer()

@@ -7,6 +7,10 @@ spec:
   selector:
     app: chat-distribuido         # Apunta a los pods con este label
 
+  # Afinidad de sesión: mantiene a cada cliente (por IP) en el mismo pod,
+  # reforzando la estabilidad de la conexión WebSocket entre réplicas.
+  sessionAffinity: ClientIP
+
   ports:
     - protocol: TCP
       port: 80                    # Puerto externo del Service
