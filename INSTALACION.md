@@ -107,8 +107,13 @@ sudo systemctl start microshift
 
 ### 4.2 Aplicar los manifiestos
 
+> **Importante:** despliega **Redis primero**. Las réplicas lo usan como bus
+> Pub/Sub para compartir los mensajes; sin él, cada pod sería una isla y dos
+> usuarios en pods distintos no se verían. Ver la sección 9.
+
 ```bash
-oc apply -f k8s/deployment.yaml   # crea el Deployment con 2 réplicas
+oc apply -f k8s/redis.yaml        # bus Pub/Sub compartido (Deployment + Service)
+oc apply -f k8s/deployment.yaml   # crea el Deployment del chat con 2 réplicas
 oc apply -f k8s/service.yaml      # expone el servicio (NodePort)
 ```
 
@@ -116,9 +121,10 @@ oc apply -f k8s/service.yaml      # expone el servicio (NodePort)
 
 ```bash
 oc get pods -w
-# Espera hasta ver dos pods en estado 1/1 Running:
-# chat-distribuido-xxxxx-aaaaa   1/1   Running   0
-# chat-distribuido-xxxxx-bbbbb   1/1   Running   0
+# Espera hasta ver Redis y las dos réplicas del chat en 1/1 Running:
+# redis-xxxxx-yyyyy               1/1   Running   0
+# chat-distribuido-xxxxx-aaaaa    1/1   Running   0
+# chat-distribuido-xxxxx-bbbbb    1/1   Running   0
 ```
 
 ### 4.4 Obtener la URL de acceso
@@ -214,3 +220,69 @@ Requiere una distribución LaTeX (TeX Live) con los paquetes `tikz`, `listings`,
 | Pods en `CrashLoopBackOff` | Error en la app | `oc logs <pod>` para ver el error |
 | No se accede al chat | Puerto bloqueado | Abrir el puerto en el firewall |
 | `oc get nodes` = `NotReady` | MicroShift detenido | `sudo systemctl start microshift` |
+| Dos usuarios no se ven | Redis no desplegado | `oc apply -f k8s/redis.yaml` y reiniciar el chat |
+| Una máquina no alcanza al servidor | Red NAT o firewall | Usar red **bridged** y abrir el NodePort |
+
+---
+
+## 9. Pruebas entre varias máquinas / VMs (en hosts distintos)
+
+El servidor corre en **una** VM con MicroShift. Las demás máquinas (físicas o
+VMs en otros hosts) actúan como **clientes** y solo necesitan alcanzar por red
+la IP y el puerto NodePort del servidor. No hay que cambiar nada del código:
+`client.js` se conecta al mismo origen que sirvió la página.
+
+### 9.1 Requisito de red
+- Configura las VMs en **modo puente (bridged)** para que tomen una IP de la LAN
+  y sean alcanzables entre hosts (con NAT necesitarías *port-forwarding*).
+- Todas las máquinas deben estar en la **misma red** y poder hacerse `ping`.
+
+```bash
+hostname -I            # IP de cada máquina/VM
+ping IP_DEL_SERVIDOR   # comprobar alcance
+```
+
+### 9.2 En la VM servidor: abrir el NodePort en el firewall
+```bash
+oc get service chat-service                              # ver el NodePort
+sudo firewall-cmd --permanent --add-port=<NODEPORT>/tcp  # p. ej. 31234
+sudo firewall-cmd --reload
+```
+
+### 9.3 Desde cada máquina cliente
+
+- **RHEL con interfaz gráfica:** abre Firefox en
+  `http://IP_DEL_SERVIDOR:<NODEPORT>`.
+
+- **RHEL solo terminal:** primero verifica el alcance y luego usa el cliente de
+  terminal (sección 10):
+  ```bash
+  ./scripts/verificar-red.sh http://IP_DEL_SERVIDOR:<NODEPORT>
+  node cliente-terminal.js http://IP_DEL_SERVIDOR:<NODEPORT> TuNombre
+  ```
+
+### 9.4 ¿Por qué Redis es necesario aquí?
+Con 2 réplicas detrás del Service, cada pod mantiene sus clientes en memoria.
+Si el usuario A queda en el Pod #1 y el B en el Pod #2, **sin Redis no se verían**
+(`server.emit()` solo alcanza a los clientes del mismo pod). El adaptador de
+Redis (`k8s/redis.yaml` + variable `REDIS_URL`) propaga los mensajes entre todas
+las réplicas mediante Pub/Sub, logrando un chat realmente distribuido y de alta
+disponibilidad. Además, el cliente usa `transports: ['websocket']` y el Service
+`sessionAffinity: ClientIP` para que la conexión sea estable con varias réplicas.
+
+---
+
+## 10. Cliente de terminal (`cliente-terminal.js`)
+
+Para chatear desde una máquina **sin navegador** (RHEL solo terminal).
+
+```bash
+# En esa máquina: Node + la dependencia del cliente
+npm install socket.io-client      # o 'npm install' si clonaste el repo
+
+# Conectarse al servidor del laboratorio
+node cliente-terminal.js http://IP_DEL_SERVIDOR:<NODEPORT> Ana
+```
+
+Escribe un mensaje y pulsa **Enter** para enviarlo; **Ctrl+C** para salir.
+Los mensajes de otros usuarios (navegador o terminal) aparecen en tiempo real.
