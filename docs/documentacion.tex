@@ -137,7 +137,9 @@ distribuida de alta disponibilidad. Consiste en un servidor \emph{backend}
 desarrollado con NestJS que gestiona conexiones WebSocket mediante Socket.io,
 y un cliente web estático servido por el mismo servidor. La infraestructura se
 orquesta con MicroShift (una distribución ligera de Kubernetes), garantizando
-disponibilidad continua mediante réplicas y sondas de vida.
+disponibilidad continua mediante réplicas y sondas de vida. Un adaptador de
+Redis sincroniza los mensajes entre las réplicas mediante \emph{Pub/Sub}, de modo
+que el chat permanece coherente sin importar a qué pod se conecte cada usuario.
 
 \subsection{Justificación de Tecnologías}
 \renewcommand{\arraystretch}{1.4}
@@ -155,6 +157,9 @@ MicroShift & Distribución ligera de Kubernetes (OpenShift) optimizada para
 entornos locales. Provee orquestación, balanceo de carga y auto-recuperación. \\
 Podman & Alternativa a Docker sin \emph{daemon}, compatible con OCI. Requerido
 por la infraestructura Red Hat del clúster. \\
+Redis & Almacén en memoria usado como bus \emph{Pub/Sub}. El adaptador de
+Socket.io lo emplea para propagar los mensajes entre todas las réplicas, de modo
+que el chat funciona aunque cada usuario quede conectado a un pod distinto. \\
 \bottomrule
 \end{tabularx}
 
@@ -185,9 +190,15 @@ tráfico, y las \textbf{dos réplicas} (pods) del servidor NestJS.
     {\textbf{NODO 3 --- Pod \#2}\\ NestJS + Socket.io\\
      \footnotesize Puerto 3000\\ \footnotesize (Réplica de redundancia)};
 
+  % --- Redis (bus Pub/Sub entre réplicas) ---
+  \node[caja, below=1.5cm of service, minimum width=5.2cm,
+        fill=rojo!10, draw=rojo] (redis)
+    {\textbf{Redis} \footnotesize (bus Pub/Sub)\\
+     \footnotesize Sincroniza mensajes entre réplicas};
+
   % --- Recuadro de infraestructura ---
   \begin{scope}[on background layer]
-    \node[contenedor, fit=(service)(pod1)(pod2),
+    \node[contenedor, fit=(service)(pod1)(pod2)(redis),
       label={[gris,font=\bfseries\footnotesize]north:INFRAESTRUCTURA MICROSHIFT}] {};
   \end{scope}
 
@@ -196,10 +207,16 @@ tráfico, y las \textbf{dos réplicas} (pods) del servidor NestJS.
     {WebSocket (ws://)\\ sobre TCP/IP\\ Socket.io + JSON} (service);
   \draw[flecha] (service) -- (pod1);
   \draw[flecha] (service) -- (pod2);
+  % Las réplicas publican/suscriben en Redis
+  \draw[{Stealth[length=2.5mm]}-{Stealth[length=2.5mm]}, very thick, rojo]
+    (pod1) -- (redis);
+  \draw[{Stealth[length=2.5mm]}-{Stealth[length=2.5mm]}, very thick, rojo]
+    (pod2) -- (redis);
 
 \end{tikzpicture}
-\caption{Arquitectura distribuida de 3 nodos con réplicas en MicroShift
-(\texttt{replicas=2}, \texttt{livenessProbe} activo).}
+\caption{Arquitectura distribuida en MicroShift con réplicas (\texttt{replicas=2},
+\texttt{livenessProbe} activo) y Redis como bus \emph{Pub/Sub} que sincroniza los
+mensajes entre los pods.}
 \label{fig:arquitectura}
 \end{figure}
 
@@ -414,24 +431,32 @@ podman images
 \end{lstlisting}
 
 \subsection{Manifiesto de Despliegue --- deployment.yaml}
-\lstinputlisting[language=,caption={k8s/deployment.yaml --- 2 réplicas y sondas de salud.}]{../k8s/deployment.yaml}
+\lstinputlisting[language=,caption={k8s/deployment.yaml --- 2 réplicas, sondas de salud y \texttt{REDIS\_URL}.}]{../k8s/deployment.yaml}
 
 \subsection{Manifiesto de Servicio --- service.yaml}
-\lstinputlisting[language=,caption={k8s/service.yaml --- expone el servicio vía NodePort.}]{../k8s/service.yaml}
+\lstinputlisting[language=,caption={k8s/service.yaml --- NodePort con \texttt{sessionAffinity}.}]{../k8s/service.yaml}
+
+\subsection{Manifiesto de Redis --- redis.yaml}
+Redis actúa como bus \emph{Pub/Sub} entre las réplicas. Su \texttt{Service} de
+tipo \texttt{ClusterIP} expone el nombre DNS interno \texttt{redis}, que las
+réplicas usan en \texttt{REDIS\_URL=redis://redis:6379}.
+\lstinputlisting[language=,caption={k8s/redis.yaml --- Deployment y Service de Redis.}]{../k8s/redis.yaml}
 
 \subsection{Comandos de Despliegue}
 \begin{lstlisting}[language=bash]
 # 1. Verificar estado del cluster antes de desplegar
 oc get nodes
 
-# 2. Aplicar los manifiestos YAML
+# 2. Aplicar los manifiestos YAML (Redis primero: bus Pub/Sub)
+oc apply -f k8s/redis.yaml
 oc apply -f k8s/deployment.yaml
 oc apply -f k8s/service.yaml
 
 # 3. Verificar que los pods se crearon y estan corriendo
 oc get pods
-# -> chat-distribuido-7d9f8b-abc12   1/1   Running   0
-# -> chat-distribuido-7d9f8b-def34   1/1   Running   0
+# -> redis-xxxxx-yyyyy              1/1   Running   0
+# -> chat-distribuido-7d9f8b-abc12  1/1   Running   0
+# -> chat-distribuido-7d9f8b-def34  1/1   Running   0
 
 # 4. Obtener la URL de acceso
 oc get service chat-service
@@ -447,7 +472,7 @@ oc get service chat-service
 % =====================================================================
 
 \subsection{Mecanismo de Alta Disponibilidad}
-El sistema garantiza alta disponibilidad mediante tres capas:
+El sistema garantiza alta disponibilidad mediante cuatro capas:
 \begin{enumerate}[leftmargin=1.6em]
   \item \textbf{Réplicas de Kubernetes:} \texttt{replicas: 2} asegura al menos
         dos instancias del servidor en todo momento.
@@ -455,7 +480,36 @@ El sistema garantiza alta disponibilidad mediante tres capas:
         conexión cada segundo de forma transparente.
   \item \textbf{LivenessProbe:} MicroShift verifica que cada pod responde y lo
         reinicia automáticamente si falla.
+  \item \textbf{Sincronización con Redis:} el adaptador \emph{Pub/Sub} comparte
+        los mensajes entre las réplicas, de modo que el chat sigue siendo
+        coherente sin importar a qué pod se conecte cada usuario.
 \end{enumerate}
+
+\subsection{Sincronización entre Réplicas con Redis (Pub/Sub)}
+Con varias réplicas, cada instancia de Socket.io mantiene sus clientes en
+memoria; un \texttt{server.emit()} solo alcanzaría a los clientes del mismo pod.
+Para que el chat sea verdaderamente distribuido se usa el adaptador de Redis:
+cada réplica \emph{publica} los mensajes en Redis y está \emph{suscrita} a ellos,
+de forma que un mensaje originado en el Pod \#1 también llega a los clientes del
+Pod \#2 (véase la Figura~\ref{fig:arquitectura}).
+
+Además, para que la conexión sea estable con varias réplicas, el cliente y el
+servidor usan \texttt{transports: ['websocket']} (evita el \emph{long-polling},
+cuyas peticiones se repartirían entre pods y causarían el error
+\emph{``Session ID unknown''}), y el \texttt{Service} fija cada cliente a un pod
+con \texttt{sessionAffinity: ClientIP}.
+
+\lstinputlisting[language=Java,caption={src/redis-io.adapter.ts --- adaptador Socket.io respaldado por Redis.},
+  morekeywords={import,from,export,class,extends,private,readonly,const,await,async,return,super}]
+  {../src/redis-io.adapter.ts}
+
+El adaptador se activa en el arranque solo si existe la variable
+\texttt{REDIS\_URL}; en desarrollo local (sin esa variable) el servidor funciona
+en memoria con una sola instancia.
+
+\lstinputlisting[language=Java,caption={src/main.ts --- activación condicional del adaptador de Redis.},
+  morekeywords={import,from,async,function,const,await,new,if,else,try,catch,return}]
+  {../src/main.ts}
 
 \subsection{Script de la Demo --- Chaos Testing}
 \begin{lstlisting}[language=bash]
@@ -516,7 +570,8 @@ Después (3--5 s) & {\color{verde}$\bullet$ Conectado} & 2 pods Running. \\
 \begin{lstlisting}[language=, basicstyle=\ttfamily\small]
 chat-distribuido/
 |-- src/
-|   |-- main.ts              <- Punto de entrada, inicia en puerto 3000
+|   |-- main.ts              <- Punto de entrada; activa Redis si hay REDIS_URL
+|   |-- redis-io.adapter.ts  <- Adaptador Socket.io <-> Redis (Pub/Sub)
 |   |-- app.module.ts        <- Modulo raiz: ChatModule y ServeStatic
 |   `-- chat/
 |       |-- chat.gateway.ts  <- Logica WebSocket: conexiones y broadcast
@@ -526,8 +581,12 @@ chat-distribuido/
 |   |-- style.css            <- Estilos del chat
 |   `-- client.js            <- Logica cliente: Socket.io, eventos, DOM
 |-- k8s/
-|   |-- deployment.yaml      <- 2 replicas del servidor en MicroShift
-|   `-- service.yaml         <- Expone el servicio (NodePort)
+|   |-- deployment.yaml      <- 2 replicas del servidor + REDIS_URL
+|   |-- service.yaml         <- NodePort + sessionAffinity
+|   `-- redis.yaml           <- Redis (bus Pub/Sub entre replicas)
+|-- scripts/
+|   `-- verificar-red.sh     <- Verifica el alcance del servidor con curl
+|-- cliente-terminal.js      <- Cliente de chat para terminal (sin navegador)
 |-- Dockerfile               <- Construye la imagen con Podman
 `-- package.json             <- Dependencias y scripts del proyecto
 \end{lstlisting}
@@ -542,6 +601,8 @@ chat-distribuido/
     "@nestjs/platform-socket.io": "^11.1.27",
     "@nestjs/serve-static": "^5.0.5",
     "@nestjs/websockets": "^11.1.27",
+    "@socket.io/redis-adapter": "^8.x",
+    "redis": "^4.x",
     "socket.io": "^4.8.3"
   }
 }
@@ -553,6 +614,9 @@ chat-distribuido/
 \normalfont\bfseries Variable & \normalfont\bfseries Defecto & \bfseries Descripción \\
 \midrule
 PORT & 3000 & Puerto en que escucha el servidor NestJS. \\
+REDIS\_URL & (vacío) & URL de Redis para el adaptador Pub/Sub. Si no se define,
+el servidor funciona en memoria (instancia única). En el clúster vale
+\texttt{redis://redis:6379}. \\
 \bottomrule
 \end{tabularx}
 
@@ -568,11 +632,12 @@ cd chat-distribuido
 # 2. Construir la imagen de contenedor
 podman build -t chat-distribuido:latest .
 
-# 3. Desplegar en MicroShift
+# 3. Desplegar en MicroShift (Redis primero: bus Pub/Sub)
+oc apply -f k8s/redis.yaml
 oc apply -f k8s/deployment.yaml
 oc apply -f k8s/service.yaml
 
-# 4. Esperar a que los pods esten listos (2/2 Running)
+# 4. Esperar a que los pods esten listos (Redis + 2/2 chat Running)
 oc get pods -w
 
 # 5. Obtener el puerto de acceso y abrir el chat
@@ -594,6 +659,31 @@ oc logs -f deployment/chat-distribuido
 oc scale deployment/chat-distribuido --replicas=3
 \end{lstlisting}
 
+\subsection{Pruebas entre Varias Máquinas y Cliente de Terminal}
+El servidor corre en una VM con MicroShift; las demás máquinas (físicas o VMs en
+otros \emph{hosts}) actúan como clientes y solo necesitan alcanzar por red la IP
+y el puerto NodePort. No se cambia código: \texttt{client.js} se conecta al mismo
+origen que sirvió la página. Requisitos: VMs en red \textbf{puente (bridged)} y
+el NodePort abierto en el \emph{firewall}.
+
+\begin{lstlisting}[language=bash]
+# En la VM servidor: abrir el NodePort en el firewall
+oc get service chat-service
+sudo firewall-cmd --permanent --add-port=<NODEPORT>/tcp
+sudo firewall-cmd --reload
+
+# Cliente con interfaz grafica: abrir en el navegador
+#   http://IP_DEL_SERVIDOR:<NODEPORT>
+
+# Cliente RHEL solo terminal (sin navegador):
+./scripts/verificar-red.sh http://IP_DEL_SERVIDOR:<NODEPORT>
+node cliente-terminal.js http://IP_DEL_SERVIDOR:<NODEPORT> TuNombre
+\end{lstlisting}
+
+El cliente de terminal (\texttt{cliente-terminal.js}) usa \texttt{socket.io-client}
+y habla el mismo protocolo que el navegador, por lo que un usuario en la terminal
+y otro en una interfaz gráfica chatean entre sí en tiempo real.
+
 \subsection{Solución de Problemas Comunes}
 \renewcommand{\arraystretch}{1.35}
 \begin{tabularx}{\linewidth}{l X X}
@@ -603,6 +693,8 @@ oc scale deployment/chat-distribuido --replicas=3
 Pods en \texttt{Pending} & Imagen no encontrada & Verificar \texttt{podman images} y reconstruir. \\
 Pods en \texttt{CrashLoopBackOff} & Error en la app & \texttt{oc logs pod-name} para ver el error. \\
 No se accede al chat & Puerto bloqueado & \texttt{sudo firewall-cmd -{}-list-ports}. \\
+Dos usuarios no se ven & Redis no desplegado & \texttt{oc apply -f k8s/redis.yaml}. \\
+Máquina no alcanza al servidor & Red NAT o firewall & Usar red \emph{bridged} y abrir el NodePort. \\
 \texttt{oc get nodes} = \texttt{NotReady} & MicroShift detenido & \texttt{sudo systemctl start microshift}. \\
 \bottomrule
 \end{tabularx}
