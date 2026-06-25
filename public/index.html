@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Distribuido</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ===== Pantalla de inicio (login con nombre) ===== -->
+    <section id="pantalla-inicio" class="pantalla">
+      <div class="tarjeta">
+        <h1>💬 Chat Distribuido</h1>
+        <p class="subtitulo">Chat en tiempo real con WebSockets · Alta disponibilidad</p>
+        <input
+          id="input-nombre"
+          type="text"
+          placeholder="Escribe tu nombre..."
+          maxlength="20"
+          autocomplete="off"
+        />
+        <button id="btn-entrar">Entrar al chat</button>
+      </div>
+    </section>
+
+    <!-- ===== Pantalla del chat ===== -->
+    <section id="pantalla-chat" class="pantalla oculto">
+      <header class="barra">
+        <span class="titulo">💬 Chat Distribuido</span>
+        <span id="estado-conexion" class="desconectado">● Conectando...</span>
+      </header>
+
+      <div id="mensajes" class="mensajes"></div>
+
+      <footer class="entrada">
+        <input
+          id="input-mensaje"
+          type="text"
+          placeholder="Escribe un mensaje..."
+          autocomplete="off"
+        />
+        <button id="btn-enviar">Enviar</button>
+      </footer>
+    </section>
+
+  </div>
+
+  <!-- Cliente Socket.io servido por el propio servidor NestJS -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
