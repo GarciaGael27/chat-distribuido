@@ -1,0 +1,16 @@
+# k8s/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: chat-service              # Nombre del Service
+spec:
+  selector:
+    app: chat-distribuido         # Apunta a los pods con este label
+
+  ports:
+    - protocol: TCP
+      port: 80                    # Puerto externo del Service
+      targetPort: 3000            # Puerto interno del contenedor
+
+  type: NodePort                  # Expone el servicio fuera del clúster.
+                                  # MicroShift asigna un puerto automático (30000-32767)

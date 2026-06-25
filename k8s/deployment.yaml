@@ -1,0 +1,43 @@
+# k8s/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-distribuido          # Nombre del Deployment
+  labels:
+    app: chat-distribuido
+spec:
+  replicas: 2                     # 2 pods = Alta Disponibilidad
+                                  # Si uno cae, el otro sigue activo
+  selector:
+    matchLabels:
+      app: chat-distribuido       # Vincula el Deployment con sus pods
+
+  template:
+    metadata:
+      labels:
+        app: chat-distribuido
+    spec:
+      containers:
+        - name: chat
+          image: localhost/chat-distribuido:latest  # Imagen local de Podman
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000  # Puerto interno del contenedor
+
+          # Verifica que el pod responde correctamente cada 5 segundos.
+          # Si falla, MicroShift reinicia el pod automáticamente.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10   # Espera 10s antes de empezar a verificar
+            periodSeconds: 5          # Verifica cada 5 segundos
+
+          # Marca el pod como "listo" para recibir tráfico sólo cuando responde.
+          # Evita enrutar clientes a un pod que aún está arrancando.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
