@@ -1,0 +1,42 @@
+# k8s/redis.yaml
+# Redis actúa como bus Pub/Sub para que las réplicas del chat compartan los
+# mensajes. Una sola instancia es suficiente para la demo (no requiere persistencia).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: docker.io/redis:7-alpine
+          ports:
+            - containerPort: 6379
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis              # Nombre DNS interno: las réplicas usan redis://redis:6379
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+  type: ClusterIP          # Solo accesible dentro del clúster

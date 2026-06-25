@@ -24,6 +24,12 @@ spec:
           ports:
             - containerPort: 3000  # Puerto interno del contenedor
 
+          # Bus Pub/Sub compartido: hace que los mensajes se difundan entre
+          # TODAS las réplicas (alta disponibilidad real del chat).
+          env:
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+
           # Verifica que el pod responde correctamente cada 5 segundos.
           # Si falla, MicroShift reinicia el pod automáticamente.
           livenessProbe:
